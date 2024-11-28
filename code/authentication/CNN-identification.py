@@ -3,8 +3,10 @@ import numpy as np
 import os
 import random
 
-config = tf.ConfigProto()
-config.gpu_options.allow_growth = True
+# より新しいTensorFlow 2.x向けの設定方法
+physical_devices = tf.config.list_physical_devices('GPU')
+if physical_devices:
+    tf.config.experimental.set_memory_growth(physical_devices[0], True)
 
 def load_X(path):
     X_signals = []
@@ -122,15 +124,15 @@ train_step = tf.train.AdamOptimizer(1e-3).minimize(cross_entropy)
 correct_prediction = tf.equal(tf.argmax(h_fc, 1), tf.argmax(label_, 1),name='cnn_pre_Y')
 accuracy = tf.reduce_mean(tf.cast(correct_prediction, tf.float32),name='cnn_accuracy')
 
-X_train = load_X('./data(98)/train/record')
-X_test = load_X('./data(98)/test/record')
+X_train = load_X('./data/train/data')
+X_test = load_X('./data/test/data')
 
-train_label = load_y('./data(98)/train/label.txt')
-test_label = load_y('./data(98)/test/label.txt')
+train_label = load_y('./data/train/y_train.txt')
+test_label = load_y('./data/test/y_test.txt')
 
 saver = tf.train.Saver(max_to_keep=1)
 
-sess = tf.InteractiveSession(config=config)
+sess = tf.InteractiveSession()
 sess.run(tf.global_variables_initializer())
 
 if os.path.exists('./cnn_ckpt'):

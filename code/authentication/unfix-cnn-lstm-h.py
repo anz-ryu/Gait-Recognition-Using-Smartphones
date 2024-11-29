@@ -104,9 +104,9 @@ class Config(object):
         self.n_steps = 32 # 128 time_steps per series
 
         # Training
-        self.learning_rate = 0.0025
+        self.learning_rate = 0.001
         self.lambda_loss_amount = 0.0015
-        self.training_epochs = 300
+        self.training_epochs = 10
         self.batch_size = 512
 
         # LSTM structure
@@ -128,15 +128,17 @@ class HAR_Model(Model):
         super(HAR_Model, self).__init__()
         
         # CNN layers
-        self.conv1 = layers.Conv2D(32, (1, 9), strides=(1, 2), padding='same', activation='relu')
+        self.conv1 = layers.Conv2D(32, (1, 9), strides=(1, 2), padding='same',
+                                  kernel_regularizer=tf.keras.regularizers.l2(0.01))
         self.pool1 = layers.MaxPool2D((1, 2), strides=(1, 2), padding='valid')
-        self.conv2 = layers.Conv2D(64, (1, 3), strides=(1, 1), padding='same', activation='relu')
-        self.conv3 = layers.Conv2D(128, (1, 3), strides=(1, 1), padding='same', activation='relu')
+        self.conv2 = layers.Conv2D(64, (1, 3), strides=(1, 1), padding='same',
+                                  kernel_regularizer=tf.keras.regularizers.l2(0.01))
         self.pool2 = layers.MaxPool2D((1, 2), strides=(1, 2), padding='valid')
-        self.conv4 = layers.Conv2D(128, (6, 1), strides=(1, 1), padding='valid', activation='relu')
+        self.conv3 = layers.Conv2D(128, (6, 1), strides=(1, 1), padding='valid', activation='relu')
         
         # LSTM layers
-        self.lstm1 = layers.LSTM(config.n_hidden, return_sequences=True)
+        self.lstm1 = layers.LSTM(config.n_hidden, return_sequences=True, 
+                                dropout=0.25, recurrent_dropout=0.25)
         self.lstm2 = layers.LSTM(config.n_hidden)
         
         # Output layer
@@ -149,17 +151,15 @@ class HAR_Model(Model):
         h1 = self.conv1(x1)
         h1 = self.pool1(h1)
         h1 = self.conv2(h1)
-        h1 = self.conv3(h1)
         h1 = self.pool2(h1)
-        h1 = self.conv4(h1)
+        h1 = self.conv3(h1)
         
         # Process second input
         h2 = self.conv1(x2)
         h2 = self.pool1(h2)
         h2 = self.conv2(h2)
-        h2 = self.conv3(h2)
         h2 = self.pool2(h2)
-        h2 = self.conv4(h2)
+        h2 = self.conv3(h2)
         
         # Reshape and concatenate
         t1 = tf.reshape(h1, [-1, 16, 128])
@@ -257,13 +257,28 @@ if __name__ == "__main__":
     test_x1 = X_test[:,:,:128]
     test_x2 = X_test[:,:,128:]
     
+    # 学習率スケジューラーの追加
+    lr_scheduler = tf.keras.callbacks.ReduceLROnPlateau(
+        monitor='val_loss',
+        factor=0.5,
+        patience=5,
+        min_lr=0.00001
+    )
+    
+    early_stopping = tf.keras.callbacks.EarlyStopping(
+        monitor='val_loss',
+        patience=10,
+        restore_best_weights=True
+    )
+    
     # モデルの訓練
     history = model.fit(
         [train_x1, train_x2], 
         train_label,
         batch_size=config.batch_size,
         epochs=config.training_epochs,
-        validation_data=([test_x1, test_x2], test_label)
+        validation_data=([test_x1, test_x2], test_label),
+        callbacks=[lr_scheduler, early_stopping]
     )
     
     # モデルの保存

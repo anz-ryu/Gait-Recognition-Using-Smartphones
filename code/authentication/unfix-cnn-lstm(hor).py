@@ -34,6 +34,7 @@
 
 
 import tensorflow as tf
+from tensorflow.keras import Model, layers
 import os
 import numpy as np
 
@@ -122,56 +123,54 @@ class Config(object):
         }
 
 
-def LSTM_Network(_X, config):
-    """Function returns a TensorFlow RNN with two stacked LSTM cells
+class HAR_Model(Model):
+    def __init__(self, config):
+        super(HAR_Model, self).__init__()
+        
+        # CNN layers
+        self.conv1 = layers.Conv2D(32, (1, 9), strides=(1, 2), padding='same', activation='relu')
+        self.pool1 = layers.MaxPool2D((1, 2), strides=(1, 2), padding='valid')
+        self.conv2 = layers.Conv2D(64, (1, 3), strides=(1, 1), padding='same', activation='relu')
+        self.conv3 = layers.Conv2D(128, (1, 3), strides=(1, 1), padding='same', activation='relu')
+        self.pool2 = layers.MaxPool2D((1, 2), strides=(1, 2), padding='valid')
+        self.conv4 = layers.Conv2D(128, (6, 1), strides=(1, 1), padding='valid', activation='relu')
+        
+        # LSTM layers
+        self.lstm1 = layers.LSTM(config.n_hidden, return_sequences=True)
+        self.lstm2 = layers.LSTM(config.n_hidden)
+        
+        # Output layer
+        self.dense = layers.Dense(config.n_classes)
 
-    Two LSTM cells are stacked which adds deepness to the neural network.
-    Note, some code of this notebook is inspired from an slightly different
-    RNN architecture used on another dataset, some of the credits goes to
-    "aymericdamien".
-
-    Args:
-        _X:     ndarray feature matrix, shape: [batch_size, time_steps, n_inputs]
-        config: Config for the neural network.
-
-    Returns:
-        This is a description of what is returned.
-
-    Raises:
-        KeyError: Raises an exception.
-
-      Args:
-        feature_mat: ndarray fature matrix, shape=[batch_size,time_steps,n_inputs]
-        config: class containing config of network
-      return:
-              : matrix  output shape [batch_size,n_classes]
-    """
-    # (NOTE: This step could be greatly optimised by shaping the dataset once
-    # input shape: (batch_size, n_steps, n_input)
-    _X = tf.transpose(_X, [1, 0, 2])  # permute n_steps and batch_size
-    # Reshape to prepare input to hidden activation
-    _X = tf.reshape(_X, [-1, config.n_inputs])
-    # new shape: (n_steps*batch_size, n_input)
-
-    # Linear activation
-    _X = tf.nn.relu(tf.matmul(_X, config.W['hidden']) + config.biases['hidden'])
-    # Split data because rnn cell needs a list of inputs for the RNN inner loop
-    _X = tf.split(_X, config.n_steps, 0)
-    # new shape: n_steps * (batch_size, n_hidden)
-
-    # Define two stacked LSTM cells (two recurrent layers deep) with tensorflow
-    lstm_cell_1 = tf.contrib.rnn.BasicLSTMCell(config.n_hidden, forget_bias=1.0, state_is_tuple=True)
-    lstm_cell_2 = tf.contrib.rnn.BasicLSTMCell(config.n_hidden, forget_bias=1.0, state_is_tuple=True)
-    lstm_cells = tf.contrib.rnn.MultiRNNCell([lstm_cell_1, lstm_cell_2]*config.n_layers, state_is_tuple=True)
-    # Get LSTM cell output
-    outputs, states = tf.contrib.rnn.static_rnn(lstm_cells, _X, dtype=tf.float32)
-
-    # Get last time step's output feature for a "many to one" style classifier,
-    # as in the image describing RNNs at the top of this page
-    lstm_last_output = outputs[-1]
-
-    # Linear activation
-    return tf.matmul(lstm_last_output, config.W['output']) + config.biases['output']
+    def call(self, inputs):
+        x1, x2 = inputs
+        
+        # Process first input
+        h1 = self.conv1(x1)
+        h1 = self.pool1(h1)
+        h1 = self.conv2(h1)
+        h1 = self.conv3(h1)
+        h1 = self.pool2(h1)
+        h1 = self.conv4(h1)
+        
+        # Process second input
+        h2 = self.conv1(x2)
+        h2 = self.pool1(h2)
+        h2 = self.conv2(h2)
+        h2 = self.conv3(h2)
+        h2 = self.pool2(h2)
+        h2 = self.conv4(h2)
+        
+        # Reshape and concatenate
+        t1 = tf.reshape(h1, [-1, 16, 128])
+        t2 = tf.reshape(h2, [-1, 16, 128])
+        ct = tf.concat([t1, t2], axis=1)
+        
+        # LSTM layers
+        x = self.lstm1(ct)
+        x = self.lstm2(x)
+        
+        return self.dense(x)
 
 
 def one_hot(y_):
@@ -237,137 +236,38 @@ if __name__ == "__main__":
     # ------------------------------------------------------
     # Step 3: Let's get serious and build the neural network
     # ------------------------------------------------------
-# =============================================================================
-# 
-#     X = tf.placeholder(tf.float32, [None, config.n_steps, config.n_inputs])
-#     Y = tf.placeholder(tf.float32, [None, config.n_classes])
-#     batch_size = 512
-# =============================================================================
-    X_ = tf.placeholder(tf.float32, [None, 6, 128, 1],name='cnn_X')
-    X2 = tf.placeholder(tf.float32, [None, 6, 128, 1],name='cnn_X2')
-    label_ = tf.placeholder(tf.float32, [None, 2],name='cnn_Y')
+
+    # モデルの構築
+    model = HAR_Model(config)
     
-    #input shape [batch, in_height, in_width, in_channels]
-    #kernel shape [filter_height, filter_width, in_channels, out_channels]
-    '''
-    	1*9
-    	stride = 2 
-    	padding
-    	6*128->6*64*32
-    '''
-    W_conv1 = weight_variable([1, 9, 1, 32])
-    b_conv1 = bias_variable([32])
-    h_conv1 = tf.nn.relu(
-        tf.nn.conv2d(X_, W_conv1, strides=[1, 1, 2, 1], padding='SAME') + b_conv1)
-    h_conv12 = tf.nn.relu(
-        tf.nn.conv2d(X2, W_conv1, strides=[1, 1, 2, 1], padding='SAME') + b_conv1)    
-    '''
-    	pooling
-    	6*64*32->6*32*32
-    '''
-    h_pool1 = tf.nn.max_pool(h_conv1, ksize=[1, 1, 2, 1], strides=[1, 1, 2, 1], padding='VALID')
-    h_pool12 = tf.nn.max_pool(h_conv12, ksize=[1, 1, 2, 1], strides=[1, 1, 2, 1], padding='VALID')
-    '''
-    	1*3
-    	stride = 1
-    	6*32*32->6*32*64
-    '''
-    W_conv2 = weight_variable([1, 3, 32, 64])
-    b_conv2 = bias_variable([64])
-    h_conv2 = tf.nn.relu(
-        tf.nn.conv2d(h_pool1, W_conv2, strides=[1, 1, 1, 1], padding='SAME') + b_conv2)
-    h_conv22 = tf.nn.relu(
-        tf.nn.conv2d(h_pool12, W_conv2, strides=[1, 1, 1, 1], padding='SAME') + b_conv2)
-    '''
-    	1*3
-    	stride = 1
-    	padding
-    	6*32*64->6*32*128
-    '''
+    # オプティマイザーと損失関数の定義
+    optimizer = tf.keras.optimizers.Adam(learning_rate=config.learning_rate)
+    loss_fn = tf.keras.losses.CategoricalCrossentropy(from_logits=True)
     
-    W_conv3 = weight_variable([1, 3, 64, 128])
-    b_conv3 = bias_variable([128])
-    h_conv3 = tf.nn.relu(
-        tf.nn.conv2d(h_conv2, W_conv3, strides=[1, 1, 1, 1], padding='SAME') + b_conv3)
-    h_conv32 = tf.nn.relu(
-        tf.nn.conv2d(h_conv22, W_conv3, strides=[1, 1, 1, 1], padding='SAME') + b_conv3)
+    # モデルのコンパイル
+    model.compile(
+        optimizer=optimizer,
+        loss=loss_fn,
+        metrics=['accuracy']
+    )
     
-    '''
-    '''
-    '''
-    	pooling
-    	6*32*128->6*16*128
-    '''
-    h_pool2 = tf.nn.max_pool(h_conv3, ksize=[1, 1, 2, 1], strides=[1, 1, 2, 1],padding='VALID')
-    h_pool22 = tf.nn.max_pool(h_conv32, ksize=[1, 1, 2, 1], strides=[1, 1, 2, 1],padding='VALID')
-    '''
-    	6*1
-    	6*32*128->1*16*128
-    '''
-    W_conv4 = weight_variable([6, 1, 128, 128])
-    b_conv4 = bias_variable([128])
-    h_conv4 = tf.nn.relu(
-        tf.nn.conv2d(h_pool2, W_conv4, strides=[1, 1, 1, 1], padding='VALID') + b_conv4)
-    h_conv42 = tf.nn.relu(
-        tf.nn.conv2d(h_pool22, W_conv4, strides=[1, 1, 1, 1], padding='VALID') + b_conv4)
-    t1 = tf.reshape(h_conv4, [-1, 16, 128]) 
-    t2 = tf.reshape(h_conv42, [-1, 16, 128])
-    ct = tf.concat([t1,t2],axis=1)     # horizental
-    pred_Y = LSTM_Network(ct, config)
-
-    # Loss,optimizer,evaluation
-    l2 = config.lambda_loss_amount * \
-        sum(tf.nn.l2_loss(tf_var) for tf_var in tf.trainable_variables())
-    # Softmax loss and L2
-    cost = tf.reduce_mean(
-        tf.nn.softmax_cross_entropy_with_logits(labels=label_, logits=pred_Y)) + l2
-    optimizer = tf.train.AdamOptimizer(
-        learning_rate=config.learning_rate).minimize(cost)
-
-    correct_pred = tf.equal(tf.argmax(pred_Y, 1), tf.argmax(label_, 1))
-    accuracy = tf.reduce_mean(tf.cast(correct_pred, dtype=tf.float32))
-
-    # --------------------------------------------
-    # Step 4: Hooray, now train the neural network
-    # --------------------------------------------
-
-    # Note that log_device_placement can be turned ON but will cause console spam with RNNs.
-    saver = tf.train.Saver(max_to_keep=1)
-
-    sess = tf.InteractiveSession(config=tf.ConfigProto(log_device_placement=False))
-    init = tf.global_variables_initializer()
-    sess.run(init)
-
-    best_accuracy = 0.0
-    # Start training for each batch and loop epochs
-    for i in range(config.training_epochs):
-        for start, end in zip(range(0, config.train_count, config.batch_size),
-                              range(config.batch_size, config.train_count + 1, config.batch_size)):
-            sess.run(optimizer, feed_dict={X_: X_train[start:end,:,:128],
-                                           X2:X_train[start:end,:,128:],
-                                           label_: train_label[start:end]})
-
-        # Test completely at every epoch: calculate accuracy
-        pred_out, accuracy_out, loss_out = sess.run(
-            [pred_Y, accuracy, cost], 
-            feed_dict={
-                X_: X_test[:,:,:128],
-                X2: X_test[:,:,128:],
-                label_: test_label
-            }
-        )
-        print("traing iter: {},".format(i) +
-              " test accuracy : {},".format(accuracy_out) +
-              " loss : {}".format(loss_out))
-        if accuracy_out>best_accuracy:
-            saver.save(sess, './lstm_ckpt/model')
-            best_accuracy = accuracy_out
-
-
-    print("")
-    print("final test accuracy: {}".format(accuracy_out))
-    print("best epoch's test accuracy: {}".format(best_accuracy))
-    print("")
+    # データの準備
+    train_x1 = X_train[:,:,:128]
+    train_x2 = X_train[:,:,128:]
+    test_x1 = X_test[:,:,:128]
+    test_x2 = X_test[:,:,128:]
+    
+    # モデルの訓練
+    history = model.fit(
+        [train_x1, train_x2], 
+        train_label,
+        batch_size=config.batch_size,
+        epochs=config.training_epochs,
+        validation_data=([test_x1, test_x2], test_label)
+    )
+    
+    # モデルの保存
+    model.save('lstm_model')
 
     # ------------------------------------------------------------------
     # Step 5: Training is good, but having visual insight is even better

@@ -3,7 +3,7 @@ import numpy as np
 import os
 import random
 
-# より新しいTensorFlow 2.x向けの設定方法
+# GPUメモリ設定
 physical_devices = tf.config.list_physical_devices('GPU')
 if physical_devices:
     tf.config.experimental.set_memory_growth(physical_devices[0], True)
@@ -24,7 +24,7 @@ def load_X(path):
         file.close()
         #X_signals = 6*totalStepNum*128
     X_signals = np.transpose(np.array(X_signals), (1, 0, 2))#(totalStepNum*6*128)
-    return X_signals.reshape(-1,6,128,1)#(totalStepNum*6*128*1)
+    return X_signals.reshape(-1,6,256,1)#(totalStepNum*6*128*1)
 
 def load_y(y_path):
     file = open(y_path, 'r')
@@ -43,132 +43,95 @@ def load_y(y_path):
     n_values = int(np.max(y_)) + 1
     return np.eye(n_values)[np.array(y_, dtype=np.int32)]  # Returns FLOATS
 
-def weight_variable(shape):
-    initial = tf.truncated_normal(shape, stddev=0.1)
-    return tf.Variable(initial)
+# モデルの定義
+def create_model():
+    inputs = tf.keras.Input(shape=(6, 256, 1))
+    
+    # 第1畳み込みブロック
+    x = tf.keras.layers.Conv2D(32, (1, 9), strides=(1, 2), padding='same')(inputs)
+    x = tf.keras.layers.ReLU()(x)
+    x = tf.keras.layers.MaxPooling2D(pool_size=(1, 2), strides=(1, 2))(x)
+    
+    # 第2畳み込みブロック
+    x = tf.keras.layers.Conv2D(64, (1, 3), strides=(1, 1), padding='same')(x)
+    x = tf.keras.layers.ReLU()(x)
+    
+    # 第3畳み込みブロック
+    x = tf.keras.layers.Conv2D(128, (1, 3), strides=(1, 1), padding='same')(x)
+    x = tf.keras.layers.ReLU()(x)
+    x = tf.keras.layers.MaxPooling2D(pool_size=(1, 2), strides=(1, 2))(x)
+    
+    # 第4畳み込みブロック
+    x = tf.keras.layers.Conv2D(128, (6, 1), strides=(1, 1), padding='valid')(x)
+    x = tf.keras.layers.ReLU()(x)
+    
+    # 全結合層
+    x = tf.keras.layers.Flatten()(x)
+    outputs = tf.keras.layers.Dense(2, activation='softmax')(x)
+    
+    model = tf.keras.Model(inputs=inputs, outputs=outputs)
+    return model
 
-def bias_variable(shape):
-    initial = tf.constant(0.1, shape=shape)
-    return tf.Variable(initial)
-
-
+# メイン処理
 batch_size = 512
-X_ = tf.placeholder(tf.float32, [None, 6, 128, 1],name='cnn_X')
-label_ = tf.placeholder(tf.float32, [None, 98],name='cnn_Y')
+epochs = 10
 
-#input shape [batch, in_height, in_width, in_channels]
-#kernel shape [filter_height, filter_width, in_channels, out_channels]
-'''
-	1*9
-	stride = 2 
-	padding
-	6*128->6*64*32
-'''
-W_conv1 = weight_variable([1, 9, 1, 32])
-b_conv1 = bias_variable([32])
-h_conv1 = tf.nn.relu(
-    tf.nn.conv2d(X_, W_conv1, strides=[1, 1, 2, 1], padding='SAME') + b_conv1)
-'''
-	pooling
-	6*64*32->6*32*32
-'''
-h_pool1 = tf.nn.max_pool(h_conv1, ksize=[1, 1, 2, 1], strides=[1, 1, 2, 1], padding='VALID')
-'''
-	1*3
-	stride = 1
-	6*32*32->6*32*64
-'''
-W_conv2 = weight_variable([1, 3, 32, 64])
-b_conv2 = bias_variable([64])
-h_conv2 = tf.nn.relu(
-    tf.nn.conv2d(h_pool1, W_conv2, strides=[1, 1, 1, 1], padding='SAME') + b_conv2)
-'''
-	1*3
-	stride = 1
-	padding
-	6*32*64->6*32*128
-'''
-
-W_conv3 = weight_variable([1, 3, 64, 128])
-b_conv3 = bias_variable([128])
-h_conv3 = tf.nn.relu(
-    tf.nn.conv2d(h_conv2, W_conv3, strides=[1, 1, 1, 1], padding='SAME') + b_conv3)
-
-'''
-'''
-'''
-	pooling
-	6*32*128->6*16*128
-'''
-h_pool2 = tf.nn.max_pool(h_conv3, ksize=[1, 1, 2, 1], strides=[1, 1, 2, 1],padding='VALID')
-'''
-	6*1
-	6*32*128->1*16*128
-'''
-W_conv4 = weight_variable([6, 1, 128, 128])
-b_conv4 = bias_variable([128])
-h_conv4 = tf.nn.relu(
-    tf.nn.conv2d(h_pool2, W_conv4, strides=[1, 1, 1, 1], padding='VALID') + b_conv4)
-'''
-	input flat 16*128=2048
-	output 20
-'''
-h_flat = tf.contrib.layers.flatten(h_conv4)
-cnn_output = tf.multiply(h_conv4,1,name='cnn_output')
-W_fc = weight_variable([2048, 98])
-b_fc = bias_variable([98])
-h_fc = tf.nn.softmax(tf.matmul(h_flat, W_fc) + b_fc)
-
-cross_entropy = tf.reduce_mean(-tf.reduce_sum(label_ * tf.log(h_fc+1e-10), reduction_indices=[1]),name='cnn_loss')
-train_step = tf.train.AdamOptimizer(1e-3).minimize(cross_entropy)
-correct_prediction = tf.equal(tf.argmax(h_fc, 1), tf.argmax(label_, 1),name='cnn_pre_Y')
-accuracy = tf.reduce_mean(tf.cast(correct_prediction, tf.float32),name='cnn_accuracy')
-
+# データの読み込み
 X_train = load_X('./data/train/data')
-X_test = load_X('./data/test/data')
-
+print(f"X_train shape: {X_train.shape}")
 train_label = load_y('./data/train/y_train.txt')
+print(f"train_label shape: {train_label.shape}")
+X_test = load_X('./data/test/data')
 test_label = load_y('./data/test/y_test.txt')
 
-saver = tf.train.Saver(max_to_keep=1)
+# モデルの構築
+model = create_model()
+model.compile(
+    optimizer=tf.keras.optimizers.Adam(1e-3),
+    loss='categorical_crossentropy',
+    metrics=['accuracy']
+)
 
-sess = tf.InteractiveSession()
-sess.run(tf.global_variables_initializer())
+# チェックポイントの設定
+checkpoint_path = "./cnn_ckpt/model"
+checkpoint_callback = tf.keras.callbacks.ModelCheckpoint(
+    checkpoint_path,
+    monitor='val_accuracy',
+    save_best_only=True,
+    save_weights_only=True,
+    verbose=1
+)
 
+# 学習履歴を保存するためのカスタムコールバック
+class CustomCallback(tf.keras.callbacks.Callback):
+    def __init__(self, filename):
+        super(CustomCallback, self).__init__()
+        self.file = open(filename, 'w')
+    
+    def on_epoch_end(self, epoch, logs=None):
+        self.file.write(f'Epoch {epoch} - loss: {logs["loss"]:.4f} - accuracy: {logs["accuracy"]:.4f} '
+                       f'- val_loss: {logs["val_loss"]:.4f} - val_accuracy: {logs["val_accuracy"]:.4f}\n')
+    
+    def on_train_end(self, logs=None):
+        self.file.close()
+
+# 既存のチェックポイントがあれば読み込む
 if os.path.exists('./cnn_ckpt'):
-    saver.restore(sess,tf.train.latest_checkpoint('./cnn_ckpt/'))
+    model.load_weights(tf.train.latest_checkpoint('./cnn_ckpt/'))
 
-best_accuracy = 0
-f = open('./result_cnn.txt','w')
-for i in range(200):
-    l = len(train_label)
-    batch_idxs = int(l / batch_size)
-    index = list(range(l))
-    random.shuffle(index)
-    for idx in range(batch_idxs):
-        image_idx = X_train[index[idx * batch_size:(idx + 1) * batch_size]]
-        label_idx = train_label[index[idx * batch_size:(idx + 1) * batch_size]]
-        #print(start,end)
-        acc, loss, _ = sess.run([accuracy, cross_entropy, train_step], feed_dict={
-            X_: image_idx,
-            label_: label_idx
-        })
-        if idx % 100 == 0:
-            print(str(i) + 'the cross_entropy:', str(loss), 'train_accuracy:', str(acc))
-            f.write(str(i) + 'the cross_entropy:'+str(loss)+'train_accuracy:'+str(acc))
-        # Test completely at every epoch: calculate accuracy
-    accuracy_out, loss_out = sess.run(
-        [accuracy, cross_entropy],
-        feed_dict={
-            X_: X_test,
-            label_: test_label
-        }
-    )
-    if accuracy_out > best_accuracy:
-        saver.save(sess,'./cnn_ckpt/model')
-        best_accuracy = accuracy_out
-    print(str(i)+'--------------the cross_entropy:', str(loss_out), '-----------------------test_accuracy:', str(accuracy_out))
-    f.write(str(i)+'--------------the cross_entropy:'+str(loss_out)+'-----------------------test_accuracy:'+str(accuracy_out))
-print("best accuracy:"+str(best_accuracy))
-f.write("best accuracy:"+str(best_accuracy))
-f.close()
+# モデルの学習
+history = model.fit(
+    X_train, train_label,
+    batch_size=batch_size,
+    epochs=epochs,
+    validation_data=(X_test, test_label),
+    callbacks=[
+        checkpoint_callback,
+        CustomCallback('./result_cnn.txt')
+    ],
+    shuffle=True
+)
+
+# 最終的な評価
+best_accuracy = max(history.history['val_accuracy'])
+print(f"Best accuracy: {best_accuracy}")

@@ -114,12 +114,12 @@ class Config(object):
         self.n_hidden = 64  # nb of neurons inside the neural network
         self.n_classes = 2  # Final output classes
         self.W = {
-            'hidden': tf.Variable(tf.random_normal([self.n_inputs, self.n_hidden])),
-            'output': tf.Variable(tf.random_normal([self.n_hidden, self.n_classes]))
+            'hidden': tf.Variable(tf.random.normal([self.n_inputs, self.n_hidden])),
+            'output': tf.Variable(tf.random.normal([self.n_hidden, self.n_classes]))
         }
         self.biases = {
-            'hidden': tf.Variable(tf.random_normal([self.n_hidden], mean=1.0)),
-            'output': tf.Variable(tf.random_normal([self.n_classes]))
+            'hidden': tf.Variable(tf.random.normal([self.n_hidden], mean=1.0)),
+            'output': tf.Variable(tf.random.normal([self.n_classes]))
         }
 
 
@@ -203,8 +203,8 @@ if __name__ == "__main__":
     DATA_PATH = "data/"
     DATASET_PATH = "data/"
     print("\n" + "Dataset is now located at: " + DATASET_PATH)
-    TRAIN = "a/"
-    TEST = "b/"
+    TRAIN = "train/"
+    TEST = "test/"
 
     X_train_signals_paths = [
         DATASET_PATH + TRAIN + "data/"  + "train" + signal + '.txt' for signal in INPUT_SIGNAL_TYPES
@@ -216,8 +216,8 @@ if __name__ == "__main__":
 
     y_train_path = DATASET_PATH + TRAIN + "y_train.txt"
     y_test_path = DATASET_PATH + TEST + "y_test.txt"
-    X_train = load_X('./data/a/data/')
-    X_test = load_X('./data/b/data/')
+    X_train = load_X('./data/train/data/')
+    X_test = load_X('./data/test/data/')
 
     train_label = load_y(y_train_path)
     test_label = load_y(y_test_path)
@@ -241,7 +241,7 @@ if __name__ == "__main__":
     model = HAR_Model(config)
     
     # オプティマイザーと損失関数の定義
-    optimizer = tf.keras.optimizers.Adam(learning_rate=config.learning_rate)
+    optimizer = tf.keras.optimizers.legacy.Adam(learning_rate=config.learning_rate)
     loss_fn = tf.keras.losses.CategoricalCrossentropy(from_logits=True)
     
     # モデルのコンパイル
